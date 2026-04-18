@@ -19,6 +19,8 @@ from utils import (
     normalize_document_metadata,
 )
 
+VALID_METADATA_TYPES = (str, int, float, bool)
+
 
 def get_embeddings() -> HuggingFaceEmbeddings:
     return HuggingFaceEmbeddings(
@@ -56,6 +58,20 @@ def load_pdf_documents(file_paths: list[Path] | None = None) -> list[Document]:
     return documents
 
 
+def sanitize_document_metadata(document: Document) -> Document:
+    """
+    Remove unsupported metadata values before upsert into Chroma.
+
+    Chroma accepts only scalar metadata values: str, int, float, or bool.
+    """
+    document.metadata = {
+        key: value
+        for key, value in document.metadata.items()
+        if value is not None and isinstance(value, VALID_METADATA_TYPES)
+    }
+    return document
+
+
 def ingest_documents(documents: list[Document], method: str = "word") -> int:
     """Chunk documents, embed them, and persist them to Chroma."""
     if not documents:
@@ -65,6 +81,8 @@ def ingest_documents(documents: list[Document], method: str = "word") -> int:
     chunks = chunk_documents(documents, method=method)
     if not chunks:
         return 0
+
+    chunks = [sanitize_document_metadata(chunk) for chunk in chunks]
 
     ids = [str(uuid4()) for _ in chunks]
     vectorstore.add_documents(documents=chunks, ids=ids)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
@@ -43,11 +44,42 @@ def _append_sources(answer: str, sources: list[str]) -> str:
     return f"{answer}\n\nSources:\n{source_lines}"
 
 
+def _is_insufficient_quota_error(exc: Exception) -> bool:
+    """Detect OpenAI quota failures without depending on a specific SDK exception class."""
+    message = str(exc).lower()
+    status_code = getattr(exc, "status_code", None)
+
+    if status_code == 429 and "insufficient_quota" in message:
+        return True
+
+    return "insufficient_quota" in message or (
+        "429" in message and "quota" in message and "openai" in message
+    )
+
+
+def _build_retrieved_context(documents: list[Any]) -> list[dict[str, Any]]:
+    context_items: list[dict[str, Any]] = []
+
+    for document in documents:
+        metadata = document.metadata
+        context_items.append(
+            {
+                "content": document.page_content,
+                "source": metadata.get("document_name", "Unknown Document"),
+                "page": metadata.get("page"),
+                "course": metadata.get("course"),
+            }
+        )
+
+    return context_items
+
+
 def answer_question(
     question: str,
     chat_history: list[dict] | None = None,
     course_filter: str | None = None,
     top_k: int = 3,
+    retrieval_only: bool = False,
 ) -> dict:
     """
     Answer a question using only retrieved context.
@@ -57,12 +89,27 @@ def answer_question(
     history = chat_history or []
     documents = retrieve_documents(question, top_k=top_k, course_filter=course_filter)
     sources = format_sources(documents)
+    retrieved_context = _build_retrieved_context(documents)
 
     if not documents:
         return {
             "answer": "I don't know",
             "sources": [],
             "documents": [],
+            "retrieved_context": [],
+            "mode": "no_context",
+        }
+
+    if retrieval_only:
+        return {
+            "answer": (
+                "Retrieval-only mode is enabled. Generation was skipped, "
+                "but the top matching context is shown below."
+            ),
+            "sources": sources,
+            "documents": documents,
+            "retrieved_context": retrieved_context,
+            "mode": "retrieval_only",
         }
 
     prompt = ChatPromptTemplate.from_messages(
@@ -88,23 +135,42 @@ def answer_question(
     )
 
     chain = prompt | _get_llm() | StrOutputParser()
-    raw_answer = chain.invoke(
-        {
-            "history": _format_history(history),
-            "context": format_context(documents),
-            "question": question,
-        }
-    ).strip()
+    try:
+        raw_answer = chain.invoke(
+            {
+                "history": _format_history(history),
+                "context": format_context(documents),
+                "question": question,
+            }
+        ).strip()
+    except Exception as exc:
+        if _is_insufficient_quota_error(exc):
+            return {
+                "answer": (
+                    "Generation is temporarily unavailable because the OpenAI API quota "
+                    "has been exceeded. The retrieval pipeline still worked, so the top "
+                    "matching context is shown below."
+                ),
+                "sources": sources,
+                "documents": documents,
+                "retrieved_context": retrieved_context,
+                "mode": "quota_fallback",
+            }
+        raise
 
     if raw_answer == "I don't know":
         return {
             "answer": "I don't know",
             "sources": sources,
             "documents": documents,
+            "retrieved_context": [],
+            "mode": "answer",
         }
 
     return {
         "answer": _append_sources(raw_answer, sources),
         "sources": sources,
         "documents": documents,
+        "retrieved_context": [],
+        "mode": "answer",
     }

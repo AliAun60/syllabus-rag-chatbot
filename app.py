@@ -78,7 +78,35 @@ def process_uploads(uploaded_files, chunk_method: str) -> tuple[int, int, list[s
     return document_count, chunk_count, errors
 
 
-def render_sidebar() -> tuple[str | None, str]:
+def render_retrieved_context(items: list[dict]) -> None:
+    if not items:
+        return
+
+    st.markdown("**Retrieved Context**")
+    for index, item in enumerate(items, start=1):
+        header_parts = [f"{index}. {item.get('source', 'Unknown Document')}"]
+        page = item.get("page")
+        course = item.get("course")
+
+        if page is not None:
+            header_parts.append(f"Page {page + 1}")
+        if course:
+            header_parts.append(f"Course: {course}")
+
+        st.markdown(f"- {' | '.join(header_parts)}")
+        st.caption(item.get("content", ""))
+
+
+def render_sources(sources: list[str], heading: str = "**Sources**") -> None:
+    if not sources:
+        return
+
+    st.markdown(heading)
+    for source in sources:
+        st.markdown(f"- {source}")
+
+
+def render_sidebar() -> tuple[str | None, str, bool]:
     with st.sidebar:
         st.title("University RAG")
 
@@ -105,6 +133,11 @@ def render_sidebar() -> tuple[str | None, str]:
             index=0,
         )
         selected_chunk_method = CHUNKING_OPTIONS[selected_chunk_label]
+        retrieval_only = st.checkbox(
+            "Retrieval-only mode",
+            value=False,
+            help="Skip OpenAI generation and show only the top retrieved chunks for demo purposes.",
+        )
 
         available_courses = get_available_courses()
         course_options = ["All Courses", *available_courses]
@@ -144,7 +177,7 @@ def render_sidebar() -> tuple[str | None, str]:
                 except Exception as exc:
                     st.error(f"Ingestion failed: {exc}")
 
-    return course_filter, selected_chunk_method
+    return course_filter, selected_chunk_method, retrieval_only
 
 
 def render_chat() -> None:
@@ -161,14 +194,16 @@ def render_chat() -> None:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message["role"] == "assistant" and message.get("sources") and message["content"] == "I don't know":
-                st.markdown("**Sources**")
-                for source in message["sources"]:
-                    st.markdown(f"- {source}")
+                render_sources(message["sources"])
+            if message["role"] == "assistant" and message.get("mode") in {"quota_fallback", "retrieval_only"}:
+                render_sources(message.get("sources", []), heading="**Top Matching Sources**")
+            if message["role"] == "assistant" and message.get("retrieved_context"):
+                render_retrieved_context(message["retrieved_context"])
 
 
 def main() -> None:
     initialize_state()
-    course_filter, _selected_chunk_method = render_sidebar()
+    course_filter, _selected_chunk_method, retrieval_only = render_sidebar()
     render_chat()
 
     prompt = st.chat_input("Ask a question about a syllabus or policy document")
@@ -192,21 +227,32 @@ def main() -> None:
                     chat_history=active_session["messages"][:-1],
                     course_filter=course_filter,
                     top_k=3,
+                    retrieval_only=retrieval_only,
                 )
             except Exception as exc:
                 error_message = f"Error: {exc}"
                 st.error(error_message)
-                active_session["messages"].append({"role": "assistant", "content": error_message, "sources": []})
+                active_session["messages"].append(
+                    {
+                        "role": "assistant",
+                        "content": error_message,
+                        "sources": [],
+                        "retrieved_context": [],
+                        "mode": "error",
+                    }
+                )
                 return
 
         if response["answer"] == "I don't know" and response["sources"]:
             st.markdown("I don't know")
-            st.markdown("**Sources**")
-            for source in response["sources"]:
-                st.markdown(f"- {source}")
+            render_sources(response["sources"])
             message_content = "I don't know"
         else:
             st.markdown(response["answer"])
+            if response.get("mode") in {"quota_fallback", "retrieval_only"}:
+                render_sources(response.get("sources", []), heading="**Top Matching Sources**")
+            if response.get("retrieved_context"):
+                render_retrieved_context(response["retrieved_context"])
             message_content = response["answer"]
 
     active_session["messages"].append(
@@ -214,6 +260,8 @@ def main() -> None:
             "role": "assistant",
             "content": message_content,
             "sources": response.get("sources", []),
+            "retrieved_context": response.get("retrieved_context", []),
+            "mode": response.get("mode", "answer"),
         }
     )
 
