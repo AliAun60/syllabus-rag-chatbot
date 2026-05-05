@@ -1,0 +1,74 @@
+[
+  {
+    "question": "What are the office hours for CSE 274?",
+    "expected_sources": ["CSE 274 Syllabus,Fall, 2023.docx"],
+    "expected_course": null,
+    "notes": "Course-specific DOCX question about instructor availability."
+  },
+  {
+    "question": "What is the grade distribution for MTH 151 Calculus I?",
+    "expected_sources": ["MTH151Syllabus.docx"],
+    "expected_course": null,
+    "notes": "DOCX question where the target course number should matter."
+  },
+  {
+    "question": "Who teaches MTH 231 Elements of Discrete Mathematics?",
+    "expected_sources": ["MTH231syl231A.pdf"],
+    "expected_course": null,
+    "notes": "PDF question about instructor metadata in the MTH 231 syllabus."
+  },
+  {
+    "question": "What are the learning outcomes for CSE 201 Introduction to Software Engineering?",
+    "expected_sources": ["CSE201 C,D.pdf"],
+    "expected_course": null,
+    "notes": "Course-specific PDF question."
+  },
+  {
+    "question": "What is the final exam policy for CSE 262?",
+    "expected_sources": ["Syllabus for CSE262 A-C.pdf"],
+    "expected_course": null,
+    "notes": "Policy wording appears in multiple syllabi, but course code should narrow it."
+  },
+  {
+    "question": "What are the lab sections or meeting times for CSE 102?",
+    "expected_sources": ["Syllabus for CSE102 A-D.pdf"],
+    "expected_course": null,
+    "notes": "Question about section schedule details."
+  },
+  {
+    "question": "What are the late assignment rules for CSE 174?",
+    "expected_sources": ["Syllabus for CSE174 I-L.pdf"],
+    "expected_course": null,
+    "notes": "Assignment policy question with similar wording across syllabi."
+  },
+  {
+    "question": "What programming language topics are covered in CSE 465 or CSE 565?",
+    "expected_sources": ["CSE 465_565 Syllabus Spring 2025.pdf"],
+    "expected_course": null,
+    "notes": "Upper-level comparative programming languages syllabus question."
+  },
+  {
+    "question": "What are the academic integrity rules for CSE 381?",
+    "expected_sources": ["Syllabus for CSE381 A-C.pdf"],
+    "expected_course": null,
+    "notes": "Policy question from the database systems syllabus."
+  },
+  {
+    "question": "Who is the instructor for CSE 383 and where does the class meet?",
+    "expected_sources": ["Syllabus for CSE383 A-C.pdf"],
+    "expected_course": null,
+    "notes": "Instructor and class location question."
+  },
+  {
+    "question": "What topics are listed for CSE 271 object-oriented programming?",
+    "expected_sources": ["Tentative Spring 2023 CSE 271 Syllabus (1).pdf"],
+    "expected_course": null,
+    "notes": "Course outline question from the CSE 271 PDF."
+  },
+  {
+    "question": "What algorithm topics are covered in the Chapter 0 Introduction Syllabus?",
+    "expected_sources": ["Chapter 0 Introduction Syllabus.pdf"],
+    "expected_course": null,
+    "notes": "Question targeting the algorithms introductory syllabus."
+  }
+]

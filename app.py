@@ -22,6 +22,8 @@ CHUNKING_OPTIONS = {
     "Sentence-Based": "sentence",
     "Semantic": "semantic",
 }
+RECENT_MEMORY_MESSAGES = 8
+SUMMARY_MAX_CHARS = 1400
 
 
 def create_chat_session(name: str | None = None) -> str:
@@ -30,6 +32,7 @@ def create_chat_session(name: str | None = None) -> str:
     st.session_state.chat_sessions[session_id] = {
         "name": session_name,
         "messages": [],
+        "summary": "",
         "created_at": datetime.now().isoformat(),
     }
     return session_id
@@ -52,12 +55,45 @@ def save_uploaded_file(uploaded_file) -> Path:
     return target_path
 
 
+def _compact_text(text: str, max_chars: int = 180) -> str:
+    compacted = " ".join(text.split())
+    if len(compacted) <= max_chars:
+        return compacted
+    return compacted[: max_chars - 3].rstrip() + "..."
+
+
+def update_conversation_summary(chat_session: dict) -> None:
+    """
+    Store a lightweight summary of older turns in Streamlit session state.
+
+    The full recent messages are still passed to the model. This summary keeps
+    longer-running conversations grounded without adding a database or extra LLM call.
+    """
+    older_messages = chat_session["messages"][:-RECENT_MEMORY_MESSAGES]
+    if not older_messages:
+        chat_session["summary"] = ""
+        return
+
+    summary_lines: list[str] = []
+    for message in older_messages[-12:]:
+        role = message.get("role", "user").capitalize()
+        content = _compact_text(message.get("content", ""))
+        if content:
+            summary_lines.append(f"{role}: {content}")
+
+    summary = "\n".join(summary_lines)
+    if len(summary) > SUMMARY_MAX_CHARS:
+        summary = summary[-SUMMARY_MAX_CHARS:].lstrip()
+
+    chat_session["summary"] = summary
+
+
 def process_uploads(uploaded_files, chunk_method: str) -> tuple[int, int, list[str]]:
     valid_paths: list[Path] = []
     errors: list[str] = []
 
     for uploaded_file in uploaded_files:
-        if not uploaded_file.name.lower().endswith(".pdf"):
+        if not uploaded_file.name.lower().endswith((".pdf", ".docx")):
             errors.append(f"{uploaded_file.name}: invalid file type")
             continue
 
@@ -106,7 +142,7 @@ def render_sources(sources: list[str], heading: str = "**Sources**") -> None:
         st.markdown(f"- {source}")
 
 
-def render_sidebar() -> tuple[str | None, str, bool]:
+def render_sidebar() -> tuple[str | None, str, bool, bool]:
     with st.sidebar:
         st.title("University RAG")
 
@@ -138,6 +174,11 @@ def render_sidebar() -> tuple[str | None, str, bool]:
             value=False,
             help="Skip OpenAI generation and show only the top retrieved chunks for demo purposes.",
         )
+        use_reranking = st.checkbox(
+            "Use reranking",
+            value=True,
+            help="Retrieve extra candidates from Chroma, then reorder them with local keyword relevance.",
+        )
 
         available_courses = get_available_courses()
         course_options = ["All Courses", *available_courses]
@@ -145,16 +186,16 @@ def render_sidebar() -> tuple[str | None, str, bool]:
         course_filter = None if selected_course == "All Courses" else selected_course
 
         uploaded_files = st.file_uploader(
-            "Upload PDFs",
-            type=["pdf"],
+            "Upload PDFs or DOCX files",
+            type=["pdf", "docx"],
             accept_multiple_files=True,
-            help="Uploaded PDFs are saved into ./data and added to the existing vector DB immediately.",
+            help="Uploaded files are saved into ./data and added to the existing vector DB immediately.",
         )
 
         if uploaded_files:
             upload_signature = tuple((file.name, file.size) for file in uploaded_files)
             if upload_signature != st.session_state.last_upload_signature:
-                with st.spinner("Processing uploaded PDFs..."):
+                with st.spinner("Processing uploaded files..."):
                     document_count, chunk_count, errors = process_uploads(uploaded_files, selected_chunk_method)
                 st.session_state.last_upload_signature = upload_signature
 
@@ -166,18 +207,18 @@ def render_sidebar() -> tuple[str | None, str, bool]:
                 for error in errors:
                     st.error(error)
 
-        if st.button("Ingest All PDFs from ./data", use_container_width=True):
-            with st.spinner("Ingesting PDFs from ./data..."):
+        if st.button("Ingest All Documents from ./data", use_container_width=True):
+            with st.spinner("Ingesting documents from ./data..."):
                 try:
                     document_count, chunk_count = ingest_data(method=selected_chunk_method)
                     if chunk_count:
                         st.success(f"Ingested {document_count} pages into {chunk_count} chunks.")
                     else:
-                        st.warning("No PDFs were found in ./data or no chunks were created.")
+                        st.warning("No supported documents were found in ./data or no chunks were created.")
                 except Exception as exc:
                     st.error(f"Ingestion failed: {exc}")
 
-    return course_filter, selected_chunk_method, retrieval_only
+    return course_filter, selected_chunk_method, retrieval_only, use_reranking
 
 
 def render_chat() -> None:
@@ -203,7 +244,7 @@ def render_chat() -> None:
 
 def main() -> None:
     initialize_state()
-    course_filter, _selected_chunk_method, retrieval_only = render_sidebar()
+    course_filter, _selected_chunk_method, retrieval_only, use_reranking = render_sidebar()
     render_chat()
 
     prompt = st.chat_input("Ask a question about a syllabus or policy document")
@@ -226,8 +267,10 @@ def main() -> None:
                     question=prompt,
                     chat_history=active_session["messages"][:-1],
                     course_filter=course_filter,
-                    top_k=3,
+                    top_k=4,
                     retrieval_only=retrieval_only,
+                    use_reranking=use_reranking,
+                    conversation_summary=active_session.get("summary", ""),
                 )
             except Exception as exc:
                 error_message = f"Error: {exc}"
@@ -241,6 +284,7 @@ def main() -> None:
                         "mode": "error",
                     }
                 )
+                update_conversation_summary(active_session)
                 return
 
         if response["answer"] == "I don't know" and response["sources"]:
@@ -264,6 +308,7 @@ def main() -> None:
             "mode": response.get("mode", "answer"),
         }
     )
+    update_conversation_summary(active_session)
 
 
 if __name__ == "__main__":

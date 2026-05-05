@@ -36,6 +36,17 @@ def _format_history(chat_history: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _format_memory(conversation_summary: str | None, chat_history: list[dict]) -> str:
+    history = _format_history(chat_history)
+    summary = (conversation_summary or "").strip()
+
+    if summary and history:
+        return f"Summary of earlier conversation:\n{summary}\n\nRecent messages:\n{history}"
+    if summary:
+        return f"Summary of earlier conversation:\n{summary}"
+    return history
+
+
 def _append_sources(answer: str, sources: list[str]) -> str:
     if not sources:
         return answer
@@ -78,8 +89,10 @@ def answer_question(
     question: str,
     chat_history: list[dict] | None = None,
     course_filter: str | None = None,
-    top_k: int = 3,
+    top_k: int = 4,
     retrieval_only: bool = False,
+    use_reranking: bool = True,
+    conversation_summary: str | None = None,
 ) -> dict:
     """
     Answer a question using only retrieved context.
@@ -87,7 +100,12 @@ def answer_question(
     Returns a response payload suitable for the Streamlit chat UI.
     """
     history = chat_history or []
-    documents = retrieve_documents(question, top_k=top_k, course_filter=course_filter)
+    documents = retrieve_documents(
+        question,
+        top_k=top_k,
+        course_filter=course_filter,
+        use_reranking=use_reranking,
+    )
     sources = format_sources(documents)
     retrieved_context = _build_retrieved_context(documents)
 
@@ -126,7 +144,7 @@ def answer_question(
             (
                 "human",
                 (
-                    "Conversation history:\n{history}\n\n"
+                    "Conversation memory:\n{history}\n\n"
                     "Retrieved context:\n{context}\n\n"
                     "Question: {question}"
                 ),
@@ -138,7 +156,7 @@ def answer_question(
     try:
         raw_answer = chain.invoke(
             {
-                "history": _format_history(history),
+                "history": _format_memory(conversation_summary, history),
                 "context": format_context(documents),
                 "question": question,
             }
